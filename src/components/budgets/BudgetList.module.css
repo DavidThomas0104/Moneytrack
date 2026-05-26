@@ -1,0 +1,10 @@
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); }
+.card { padding: var(--space-5); display: flex; align-items: center; gap: var(--space-4); }
+.info { flex: 1; }
+.category { font-size: 0.95rem; font-weight: 500; text-transform: capitalize; margin-bottom: 4px; }
+.meta { font-size: 0.75rem; color: var(--color-text-muted); }
+.progress { margin-top: 8px; height: 6px; background: rgba(255,255,255,0.06); border-radius: var(--radius-full); overflow: hidden; }
+.fill { height: 100%; border-radius: var(--radius-full); transition: width 0.6s ease; }
+.actions { display: flex; gap: 4px; }
+.actionBtn { padding: 4px; border-radius: var(--radius-sm); color: var(--color-text-muted); transition: all var(--transition-fast); }
+.actionBtn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }

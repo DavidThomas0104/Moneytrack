@@ -1,0 +1,80 @@
+.wrapper {
+  position: relative;
+  margin-bottom: 4px;
+}
+
+.input {
+  width: 100%;
+  padding: 20px 16px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: #f1f5f9;
+  font-size: 0.9375rem;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.input:focus {
+  border-color: rgba(124, 58, 237, 0.5);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.input::placeholder {
+  color: transparent;
+}
+
+.input:focus::placeholder {
+  color: #475569;
+}
+
+.withIcon {
+  padding-left: 44px;
+}
+
+.label {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #64748b;
+  font-size: 0.9rem;
+  pointer-events: none;
+  transition: all 0.2s ease;
+}
+
+.labelWithIcon {
+  left: 44px;
+}
+
+.floated {
+  top: 10px;
+  transform: translateY(0);
+  font-size: 0.7rem;
+  color: #8b5cf6;
+  letter-spacing: 0.02em;
+}
+
+.icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  z-index: 1;
+}
+
+.hasError .input {
+  border-color: rgba(244, 63, 94, 0.5);
+}
+
+.error {
+  display: block;
+  color: #f43f5e;
+  font-size: 0.75rem;
+  margin-top: 4px;
+  padding-left: 4px;
+}

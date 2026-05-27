@@ -11,6 +11,14 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '',
 };
 
+if (typeof window !== 'undefined') {
+  if (!process.env.NEXT_PUBLIC_FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY === 'placeholder') {
+    console.warn("?? Firebase API Key is not set or is using 'placeholder'! Check your .env.local or Vercel config.");
+  } else {
+    console.log("?? Firebase initialized with API Key starting with: " + process.env.NEXT_PUBLIC_FIREBASE_API_KEY.substring(0, 6) + "...");
+  }
+}
+
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);

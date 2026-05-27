@@ -1,10 +1,22 @@
-'use client';
+﻿'use client';
 
-import { createContext, useContext, useReducer, useEffect, useCallback, type ReactNode } from 'react';
-import { useAuth } from '@/context/AuthContext';
-import type { Transaction, Budget, RecurringRule, UserSettings } from '@/types';
-import * as fs from '@/lib/firestore';
+import {
+  createContext,
+  useContext,
+  useReducer,
+  useCallback,
+  useEffect,
+  type ReactNode,
+} from 'react';
 import toast from 'react-hot-toast';
+import { useAuth } from '@/context/AuthContext';
+import { useCrypto } from '@/context/CryptoContext';
+import * as fs from '@/lib/firestore';
+import type { Transaction, Budget, RecurringRule, UserSettings } from '@/types';
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
 
 interface AppState {
   transactions: Transaction[];
@@ -85,48 +97,63 @@ const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const { dataKey, isEncryptionEnabled, isLocked, isLoading: cryptoLoading } = useCrypto();
   const [state, dispatch] = useReducer(appReducer, initialState);
+
+  // Use the key for encryption — null means no encryption (backward compat)
+  const key = dataKey;
 
   const fetchData = useCallback(async () => {
     if (!user) {
       dispatch({ type: 'SET_DATA', payload: { transactions: [], budgets: [], recurringRules: [], settings: null } });
       return;
     }
+
+    // If encryption is enabled but locked, don't fetch — wait for unlock
+    if (isEncryptionEnabled && isLocked) {
+      dispatch({ type: 'SET_LOADING', payload: false });
+      return;
+    }
+
     dispatch({ type: 'SET_LOADING', payload: true });
     try {
       const [transactions, budgets, recurringRules, settings] = await Promise.all([
-        fs.getTransactions(user.uid),
-        fs.getBudgets(user.uid),
-        fs.getRecurringRules(user.uid),
-        fs.getUserSettings(user.uid),
+        fs.getTransactions(user.uid, key),
+        fs.getBudgets(user.uid, key),
+        fs.getRecurringRules(user.uid, key),
+        fs.getUserSettings(user.uid, key),
       ]);
       dispatch({ type: 'SET_DATA', payload: { transactions, budgets, recurringRules, settings } });
     } catch (err) {
       console.error('Failed to fetch data:', err);
       dispatch({ type: 'SET_LOADING', payload: false });
     }
-  }, [user]);
+  }, [user, key, isEncryptionEnabled, isLocked]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    // Don't fetch while crypto is still loading
+    if (cryptoLoading) return;
+    fetchData();
+  }, [fetchData, cryptoLoading]);
 
   const addTransaction = useCallback(async (data: Omit<Transaction, 'id'>) => {
     if (!user) return;
     try {
-      const id = await fs.addTransaction(user.uid, data);
+      const id = await fs.addTransaction(user.uid, data, key);
       dispatch({ type: 'ADD_TRANSACTION', payload: { ...data, id } as Transaction });
       toast.success('Transaction added');
     } catch (err) { toast.error('Failed to add transaction'); throw err; }
-  }, [user]);
+  }, [user, key]);
 
   const updateTransaction = useCallback(async (id: string, data: Partial<Omit<Transaction, 'id'>>) => {
     if (!user) return;
     try {
-      await fs.updateTransaction(user.uid, id, data);
+      await fs.updateTransaction(user.uid, id, data, key);
       const existing = state.transactions.find(t => t.id === id);
       if (existing) dispatch({ type: 'UPDATE_TRANSACTION', payload: { ...existing, ...data, id } as Transaction });
       toast.success('Transaction updated');
     } catch (err) { toast.error('Failed to update'); throw err; }
-  }, [user, state.transactions]);
+  }, [user, state.transactions, key]);
 
   const deleteTransaction = useCallback(async (id: string) => {
     if (!user) return;
@@ -140,21 +167,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addBudget = useCallback(async (data: Omit<Budget, 'id'>) => {
     if (!user) return;
     try {
-      const id = await fs.addBudget(user.uid, data);
+      const id = await fs.addBudget(user.uid, data, key);
       dispatch({ type: 'ADD_BUDGET', payload: { ...data, id } as Budget });
       toast.success('Budget created');
     } catch (err) { toast.error('Failed to create budget'); throw err; }
-  }, [user]);
+  }, [user, key]);
 
   const updateBudget = useCallback(async (id: string, data: Partial<Omit<Budget, 'id'>>) => {
     if (!user) return;
     try {
-      await fs.updateBudget(user.uid, id, data);
+      await fs.updateBudget(user.uid, id, data, key);
       const existing = state.budgets.find(b => b.id === id);
       if (existing) dispatch({ type: 'UPDATE_BUDGET', payload: { ...existing, ...data, id } as Budget });
       toast.success('Budget updated');
     } catch (err) { toast.error('Failed to update budget'); throw err; }
-  }, [user, state.budgets]);
+  }, [user, state.budgets, key]);
 
   const deleteBudget = useCallback(async (id: string) => {
     if (!user) return;
@@ -168,21 +195,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addRecurring = useCallback(async (data: Omit<RecurringRule, 'id'>) => {
     if (!user) return;
     try {
-      const id = await fs.addRecurringRule(user.uid, data);
+      const id = await fs.addRecurringRule(user.uid, data, key);
       dispatch({ type: 'ADD_RECURRING', payload: { ...data, id } as RecurringRule });
       toast.success('Recurring rule created');
     } catch (err) { toast.error('Failed to create rule'); throw err; }
-  }, [user]);
+  }, [user, key]);
 
   const updateRecurring = useCallback(async (id: string, data: Partial<Omit<RecurringRule, 'id'>>) => {
     if (!user) return;
     try {
-      await fs.updateRecurringRule(user.uid, id, data);
+      await fs.updateRecurringRule(user.uid, id, data, key);
       const existing = state.recurringRules.find(r => r.id === id);
       if (existing) dispatch({ type: 'UPDATE_RECURRING', payload: { ...existing, ...data, id } as RecurringRule });
       toast.success('Rule updated');
     } catch (err) { toast.error('Failed to update rule'); throw err; }
-  }, [user, state.recurringRules]);
+  }, [user, state.recurringRules, key]);
 
   const deleteRecurring = useCallback(async (id: string) => {
     if (!user) return;
@@ -196,11 +223,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateSettings = useCallback(async (data: Partial<UserSettings>) => {
     if (!user) return;
     try {
-      await fs.updateUserSettings(user.uid, data);
+      await fs.updateUserSettings(user.uid, data, key);
       dispatch({ type: 'SET_SETTINGS', payload: { ...state.settings, ...data } as UserSettings });
       toast.success('Settings saved');
     } catch (err) { toast.error('Failed to save settings'); throw err; }
-  }, [user, state.settings]);
+  }, [user, state.settings, key]);
 
   const value: AppContextValue = {
     ...state,

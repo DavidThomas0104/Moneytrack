@@ -13,7 +13,23 @@
   Timestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { encryptFields, decryptFields } from '@/lib/crypto';
 import type { Transaction, Budget, RecurringRule, UserSettings } from '@/types';
+
+// ---------------------------------------------------------------------------
+// Encrypted field definitions
+// ---------------------------------------------------------------------------
+
+const TRANSACTION_ENCRYPTED_FIELDS = ['type', 'amount', 'category', 'description', 'date'];
+const TRANSACTION_TYPE_HINTS: Record<string, 'number' | 'string'> = { amount: 'number' };
+
+const BUDGET_ENCRYPTED_FIELDS = ['category', 'limit'];
+const BUDGET_TYPE_HINTS: Record<string, 'number' | 'string'> = { limit: 'number' };
+
+const RECURRING_ENCRYPTED_FIELDS = ['type', 'amount', 'category', 'description'];
+const RECURRING_TYPE_HINTS: Record<string, 'number' | 'string'> = { amount: 'number' };
+
+const SETTINGS_ENCRYPTED_FIELDS = ['displayName'];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -31,35 +47,69 @@ function userDoc(userId: string, collectionPath: string, docId: string) {
 // Transactions
 // ---------------------------------------------------------------------------
 
-export async function getTransactions(userId: string): Promise<Transaction[]> {
+export async function getTransactions(
+  userId: string,
+  cryptoKey?: CryptoKey | null
+): Promise<Transaction[]> {
   const q = query(
     userCollection(userId, 'transactions'),
-    orderBy('date', 'desc')
+    orderBy('createdAt', 'desc')
   );
   const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => ({
+  const docs = snapshot.docs.map((d) => ({
     id: d.id,
     ...d.data(),
-  })) as Transaction[];
+  }));
+
+  // Decrypt each document
+  const results: Transaction[] = [];
+  for (const docData of docs) {
+    const decrypted = await decryptFields(
+      docData as Record<string, unknown>,
+      cryptoKey ?? null,
+      TRANSACTION_ENCRYPTED_FIELDS,
+      TRANSACTION_TYPE_HINTS
+    );
+    results.push(decrypted as unknown as Transaction);
+  }
+  return results;
 }
 
 export async function addTransaction(
   userId: string,
-  data: Omit<Transaction, 'id'>
+  data: Omit<Transaction, 'id'>,
+  cryptoKey?: CryptoKey | null
 ): Promise<string> {
-  const docRef = await addDoc(userCollection(userId, 'transactions'), {
+  let payload: Record<string, unknown> = {
     ...data,
     createdAt: data.createdAt || Timestamp.now().toDate().toISOString(),
-  });
+  };
+
+  if (cryptoKey) {
+    payload = await encryptFields(payload, cryptoKey, TRANSACTION_ENCRYPTED_FIELDS);
+  }
+
+  const docRef = await addDoc(userCollection(userId, 'transactions'), payload);
   return docRef.id;
 }
 
 export async function updateTransaction(
   userId: string,
   transactionId: string,
-  data: Partial<Omit<Transaction, 'id'>>
+  data: Partial<Omit<Transaction, 'id'>>,
+  cryptoKey?: CryptoKey | null
 ): Promise<void> {
-  await updateDoc(userDoc(userId, 'transactions', transactionId), data);
+  let payload: Record<string, unknown> = { ...data };
+
+  if (cryptoKey) {
+    // Only encrypt the fields that are actually being updated
+    const fieldsToEncrypt = TRANSACTION_ENCRYPTED_FIELDS.filter(f => f in payload);
+    if (fieldsToEncrypt.length > 0) {
+      payload = await encryptFields(payload, cryptoKey, fieldsToEncrypt);
+    }
+  }
+
+  await updateDoc(userDoc(userId, 'transactions', transactionId), payload);
 }
 
 export async function deleteTransaction(
@@ -73,35 +123,67 @@ export async function deleteTransaction(
 // Budgets
 // ---------------------------------------------------------------------------
 
-export async function getBudgets(userId: string): Promise<Budget[]> {
+export async function getBudgets(
+  userId: string,
+  cryptoKey?: CryptoKey | null
+): Promise<Budget[]> {
   const q = query(
     userCollection(userId, 'budgets'),
     orderBy('createdAt', 'desc')
   );
   const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => ({
+  const docs = snapshot.docs.map((d) => ({
     id: d.id,
     ...d.data(),
-  })) as Budget[];
+  }));
+
+  const results: Budget[] = [];
+  for (const docData of docs) {
+    const decrypted = await decryptFields(
+      docData as Record<string, unknown>,
+      cryptoKey ?? null,
+      BUDGET_ENCRYPTED_FIELDS,
+      BUDGET_TYPE_HINTS
+    );
+    results.push(decrypted as unknown as Budget);
+  }
+  return results;
 }
 
 export async function addBudget(
   userId: string,
-  data: Omit<Budget, 'id'>
+  data: Omit<Budget, 'id'>,
+  cryptoKey?: CryptoKey | null
 ): Promise<string> {
-  const docRef = await addDoc(userCollection(userId, 'budgets'), {
+  let payload: Record<string, unknown> = {
     ...data,
     createdAt: data.createdAt || Timestamp.now().toDate().toISOString(),
-  });
+  };
+
+  if (cryptoKey) {
+    payload = await encryptFields(payload, cryptoKey, BUDGET_ENCRYPTED_FIELDS);
+  }
+
+  const docRef = await addDoc(userCollection(userId, 'budgets'), payload);
   return docRef.id;
 }
 
 export async function updateBudget(
   userId: string,
   budgetId: string,
-  data: Partial<Omit<Budget, 'id'>>
+  data: Partial<Omit<Budget, 'id'>>,
+  cryptoKey?: CryptoKey | null
 ): Promise<void> {
-  await updateDoc(userDoc(userId, 'budgets', budgetId), data);
+  let payload: Record<string, unknown> = { ...data };
+
+  if (cryptoKey) {
+    const fieldsToEncrypt = BUDGET_ENCRYPTED_FIELDS.filter(f => f in payload);
+    if (fieldsToEncrypt.length > 0) {
+      payload = await encryptFields(payload, cryptoKey, fieldsToEncrypt);
+    }
+  }
+
+  await updateDoc(userDoc(userId, 'budgets', budgetId), payload);
 }
 
 export async function deleteBudget(
@@ -116,36 +198,66 @@ export async function deleteBudget(
 // ---------------------------------------------------------------------------
 
 export async function getRecurringRules(
-  userId: string
+  userId: string,
+  cryptoKey?: CryptoKey | null
 ): Promise<RecurringRule[]> {
   const q = query(
     userCollection(userId, 'recurringRules'),
     orderBy('createdAt', 'desc')
   );
   const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => ({
+  const docs = snapshot.docs.map((d) => ({
     id: d.id,
     ...d.data(),
-  })) as RecurringRule[];
+  }));
+
+  const results: RecurringRule[] = [];
+  for (const docData of docs) {
+    const decrypted = await decryptFields(
+      docData as Record<string, unknown>,
+      cryptoKey ?? null,
+      RECURRING_ENCRYPTED_FIELDS,
+      RECURRING_TYPE_HINTS
+    );
+    results.push(decrypted as unknown as RecurringRule);
+  }
+  return results;
 }
 
 export async function addRecurringRule(
   userId: string,
-  data: Omit<RecurringRule, 'id'>
+  data: Omit<RecurringRule, 'id'>,
+  cryptoKey?: CryptoKey | null
 ): Promise<string> {
-  const docRef = await addDoc(userCollection(userId, 'recurringRules'), {
+  let payload: Record<string, unknown> = {
     ...data,
     createdAt: data.createdAt || Timestamp.now().toDate().toISOString(),
-  });
+  };
+
+  if (cryptoKey) {
+    payload = await encryptFields(payload, cryptoKey, RECURRING_ENCRYPTED_FIELDS);
+  }
+
+  const docRef = await addDoc(userCollection(userId, 'recurringRules'), payload);
   return docRef.id;
 }
 
 export async function updateRecurringRule(
   userId: string,
   ruleId: string,
-  data: Partial<Omit<RecurringRule, 'id'>>
+  data: Partial<Omit<RecurringRule, 'id'>>,
+  cryptoKey?: CryptoKey | null
 ): Promise<void> {
-  await updateDoc(userDoc(userId, 'recurringRules', ruleId), data);
+  let payload: Record<string, unknown> = { ...data };
+
+  if (cryptoKey) {
+    const fieldsToEncrypt = RECURRING_ENCRYPTED_FIELDS.filter(f => f in payload);
+    if (fieldsToEncrypt.length > 0) {
+      payload = await encryptFields(payload, cryptoKey, fieldsToEncrypt);
+    }
+  }
+
+  await updateDoc(userDoc(userId, 'recurringRules', ruleId), payload);
 }
 
 export async function deleteRecurringRule(
@@ -161,7 +273,8 @@ export async function deleteRecurringRule(
 
 export async function getTransactionsByRecurringId(
   userId: string,
-  recurringId: string
+  recurringId: string,
+  cryptoKey?: CryptoKey | null
 ): Promise<Transaction[]> {
   const q = query(
     userCollection(userId, 'transactions'),
@@ -169,10 +282,22 @@ export async function getTransactionsByRecurringId(
     orderBy('date', 'desc')
   );
   const snapshot = await getDocs(q);
-  return snapshot.docs.map((d) => ({
+  const docs = snapshot.docs.map((d) => ({
     id: d.id,
     ...d.data(),
-  })) as Transaction[];
+  }));
+
+  const results: Transaction[] = [];
+  for (const docData of docs) {
+    const decrypted = await decryptFields(
+      docData as Record<string, unknown>,
+      cryptoKey ?? null,
+      TRANSACTION_ENCRYPTED_FIELDS,
+      TRANSACTION_TYPE_HINTS
+    );
+    results.push(decrypted as unknown as Transaction);
+  }
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -180,26 +305,51 @@ export async function getTransactionsByRecurringId(
 // ---------------------------------------------------------------------------
 
 export async function getUserSettings(
-  userId: string
+  userId: string,
+  cryptoKey?: CryptoKey | null
 ): Promise<UserSettings | null> {
   const docRef = doc(db, 'users', userId);
   const snapshot = await getDoc(docRef);
   if (!snapshot.exists()) return null;
-  return snapshot.data() as UserSettings;
+
+  const data = snapshot.data();
+  const decrypted = await decryptFields(
+    data as Record<string, unknown>,
+    cryptoKey ?? null,
+    SETTINGS_ENCRYPTED_FIELDS
+  );
+  return decrypted as unknown as UserSettings;
 }
 
 export async function setUserSettings(
   userId: string,
-  data: UserSettings
+  data: UserSettings,
+  cryptoKey?: CryptoKey | null
 ): Promise<void> {
   const docRef = doc(db, 'users', userId);
-  await setDoc(docRef, data, { merge: true });
+  let payload: Record<string, unknown> = { ...data };
+
+  if (cryptoKey) {
+    payload = await encryptFields(payload, cryptoKey, SETTINGS_ENCRYPTED_FIELDS);
+  }
+
+  await setDoc(docRef, payload, { merge: true });
 }
 
 export async function updateUserSettings(
   userId: string,
-  data: Partial<UserSettings>
+  data: Partial<UserSettings>,
+  cryptoKey?: CryptoKey | null
 ): Promise<void> {
   const docRef = doc(db, 'users', userId);
-  await setDoc(docRef, data, { merge: true });
+  let payload: Record<string, unknown> = { ...data };
+
+  if (cryptoKey) {
+    const fieldsToEncrypt = SETTINGS_ENCRYPTED_FIELDS.filter(f => f in payload);
+    if (fieldsToEncrypt.length > 0) {
+      payload = await encryptFields(payload, cryptoKey, fieldsToEncrypt);
+    }
+  }
+
+  await setDoc(docRef, payload, { merge: true });
 }

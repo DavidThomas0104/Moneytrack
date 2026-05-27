@@ -1,8 +1,9 @@
-'use client';
+﻿'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
+import { useCrypto } from '@/context/CryptoContext';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { Mail, Lock } from 'lucide-react';
@@ -14,6 +15,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn } = useAuth();
+  const { setPassword: setCryptoPassword } = useCrypto();
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -21,6 +23,8 @@ export default function LoginPage() {
     if (!email || !password) { toast.error('Please fill in all fields'); return; }
     setLoading(true);
     try {
+      // Store password for encryption before auth (CryptoContext picks it up after user loads)
+      setCryptoPassword(password);
       await signIn(email, password);
       router.push('/dashboard');
     } catch (err: any) {

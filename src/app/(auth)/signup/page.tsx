@@ -1,8 +1,9 @@
-'use client';
+﻿'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
+import { useCrypto } from '@/context/CryptoContext';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { User, Mail, Lock } from 'lucide-react';
@@ -15,6 +16,7 @@ export default function SignupPage() {
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
   const { signUp } = useAuth();
+  const { setPassword: setCryptoPassword } = useCrypto();
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -24,6 +26,8 @@ export default function SignupPage() {
     if (password.length < 6) { toast.error('Password must be at least 6 characters'); return; }
     setLoading(true);
     try {
+      // Store password for encryption before auth (CryptoContext picks it up after user loads)
+      setCryptoPassword(password);
       await signUp(email, password, name);
       router.push('/dashboard');
     } catch (err: any) {

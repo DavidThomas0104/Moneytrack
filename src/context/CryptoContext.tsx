@@ -6,6 +6,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from 'react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -24,26 +25,19 @@ import {
 // ---------------------------------------------------------------------------
 
 interface EncryptionMeta {
-  salt: string;        // Base64 salt for PBKDF2
-  wrappedKey: string;  // Base64 AES-GCM wrapped data key
-  iv: string;          // Base64 IV used to wrap the data key
+  salt: string;
+  wrappedKey: string;
+  iv: string;
   createdAt: string;
 }
 
 interface CryptoContextValue {
-  /** The data encryption key — null if not set up or locked. */
   dataKey: CryptoKey | null;
-  /** Whether the user has encryption enabled (metadata exists in Firestore). */
   isEncryptionEnabled: boolean;
-  /** Whether encryption state is still loading from Firestore. */
   isLoading: boolean;
-  /** Whether the vault is locked (key not in memory). */
   isLocked: boolean;
-  /** First-time encryption setup: create key, wrap it, store in Firestore. */
-  setupEncryption: (password: string) => Promise<void>;
-  /** Unlock encryption on a returning session / new device. */
-  unlockEncryption: (password: string) => Promise<void>;
-  /** Lock (clear key from memory). Called on sign-out. */
+  /** Store the login password so encryption auto-initializes after auth. */
+  setPassword: (password: string) => void;
   lockEncryption: () => void;
 }
 
@@ -54,7 +48,7 @@ interface CryptoContextValue {
 const CryptoContext = createContext<CryptoContextValue | undefined>(undefined);
 
 // ---------------------------------------------------------------------------
-// Helpers — convert Uint8Array <-> Base64 for Firestore storage
+// Helpers
 // ---------------------------------------------------------------------------
 
 function bufToB64(buf: Uint8Array): string {
@@ -78,18 +72,18 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
   const [dataKey, setDataKey] = useState<CryptoKey | null>(null);
   const [encMeta, setEncMeta] = useState<EncryptionMeta | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Firestore path for encryption metadata
-  const encDocRef = user ? doc(db, 'users', user.uid, 'settings', 'encryption') : null;
+  const [metaLoaded, setMetaLoaded] = useState(false);
+  const pendingPassword = useRef<string | null>(null);
 
   // -----------------------------------------------------------------------
-  // Load encryption metadata on auth change
+  // Load encryption metadata when user changes
   // -----------------------------------------------------------------------
   useEffect(() => {
     if (!user) {
       setDataKey(null);
       setEncMeta(null);
       setIsLoading(false);
+      setMetaLoaded(false);
       return;
     }
 
@@ -99,14 +93,12 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
       try {
         const snap = await getDoc(doc(db, 'users', user.uid, 'settings', 'encryption'));
         if (!cancelled) {
-          if (snap.exists()) {
-            setEncMeta(snap.data() as EncryptionMeta);
-          } else {
-            setEncMeta(null);
-          }
+          setEncMeta(snap.exists() ? (snap.data() as EncryptionMeta) : null);
+          setMetaLoaded(true);
         }
       } catch (err) {
         console.error('Failed to load encryption metadata:', err);
+        if (!cancelled) setMetaLoaded(true);
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -116,81 +108,77 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   // -----------------------------------------------------------------------
-  // Lock on sign-out
+  // Auto setup/unlock when password + user + metadata are all ready
+  // -----------------------------------------------------------------------
+  useEffect(() => {
+    if (!user || !metaLoaded || !pendingPassword.current || dataKey) return;
+
+    const password = pendingPassword.current;
+
+    (async () => {
+      setIsLoading(true);
+      try {
+        if (encMeta) {
+          // Existing user — unlock
+          const salt = b64ToBuf(encMeta.salt);
+          const wrappingKey = await deriveKey(password, salt);
+          const key = await unwrapDataKey(encMeta.wrappedKey, encMeta.iv, wrappingKey);
+          setDataKey(key);
+        } else {
+          // New user — first-time setup
+          const salt = generateSalt();
+          const wrappingKey = await deriveKey(password, salt);
+          const newDataKey = await generateDataKey();
+          const { wrappedKey, iv } = await wrapDataKey(newDataKey, wrappingKey);
+
+          const meta: EncryptionMeta = {
+            salt: bufToB64(salt),
+            wrappedKey,
+            iv,
+            createdAt: new Date().toISOString(),
+          };
+          await setDoc(doc(db, 'users', user.uid, 'settings', 'encryption'), meta);
+
+          setEncMeta(meta);
+          setDataKey(newDataKey);
+        }
+      } catch (err) {
+        console.error('Auto encryption setup/unlock failed:', err);
+      } finally {
+        pendingPassword.current = null;
+        setIsLoading(false);
+      }
+    })();
+  }, [user, metaLoaded, encMeta, dataKey]);
+
+  // -----------------------------------------------------------------------
+  // Clear key on sign-out
   // -----------------------------------------------------------------------
   useEffect(() => {
     if (!user) {
       setDataKey(null);
+      pendingPassword.current = null;
     }
   }, [user]);
 
   // -----------------------------------------------------------------------
-  // First-time setup
+  // Public: store password (called from login/signup pages before auth)
   // -----------------------------------------------------------------------
-  const setupEncryption = useCallback(async (password: string) => {
-    if (!user || !encDocRef) throw new Error('Must be signed in');
-
-    // 1. Generate a random salt
-    const salt = generateSalt();
-
-    // 2. Derive a wrapping key from the password
-    const wrappingKey = await deriveKey(password, salt);
-
-    // 3. Generate a random data key (used for actual data encryption)
-    const newDataKey = await generateDataKey();
-
-    // 4. Wrap the data key with the wrapping key
-    const { wrappedKey, iv } = await wrapDataKey(newDataKey, wrappingKey);
-
-    // 5. Store the metadata in Firestore (salt + wrapped key + IV)
-    const meta: EncryptionMeta = {
-      salt: bufToB64(salt),
-      wrappedKey,
-      iv,
-      createdAt: new Date().toISOString(),
-    };
-    await setDoc(encDocRef, meta);
-
-    setEncMeta(meta);
-    setDataKey(newDataKey);
-  }, [user, encDocRef]);
-
-  // -----------------------------------------------------------------------
-  // Unlock (returning session / new device)
-  // -----------------------------------------------------------------------
-  const unlockEncryption = useCallback(async (password: string) => {
-    if (!encMeta) throw new Error('Encryption not set up');
-
-    // 1. Derive the wrapping key from the password + stored salt
-    const salt = b64ToBuf(encMeta.salt);
-    const wrappingKey = await deriveKey(password, salt);
-
-    // 2. Unwrap the data key
-    try {
-      const key = await unwrapDataKey(encMeta.wrappedKey, encMeta.iv, wrappingKey);
-      setDataKey(key);
-    } catch {
-      throw new Error('Wrong encryption password');
-    }
-  }, [encMeta]);
-
-  // -----------------------------------------------------------------------
-  // Lock
-  // -----------------------------------------------------------------------
-  const lockEncryption = useCallback(() => {
-    setDataKey(null);
+  const setPassword = useCallback((password: string) => {
+    pendingPassword.current = password;
   }, []);
 
-  // -----------------------------------------------------------------------
-  // Value
-  // -----------------------------------------------------------------------
+  const lockEncryption = useCallback(() => {
+    setDataKey(null);
+    pendingPassword.current = null;
+  }, []);
+
   const value: CryptoContextValue = {
     dataKey,
     isEncryptionEnabled: !!encMeta,
     isLoading,
     isLocked: !!encMeta && !dataKey,
-    setupEncryption,
-    unlockEncryption,
+    setPassword,
     lockEncryption,
   };
 

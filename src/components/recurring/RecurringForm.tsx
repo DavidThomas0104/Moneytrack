@@ -1,7 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
 import Modal from '@/components/ui/Modal';
-import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import { INCOME_CATEGORIES, EXPENSE_CATEGORIES } from '@/types';
@@ -30,8 +29,6 @@ export default function RecurringForm({ isOpen, onClose, onSubmit, initialData }
     } else { setType('expense'); setAmount(''); setCategory(''); setDescription(''); setFrequency('monthly'); setStartDate(new Date().toISOString().slice(0, 10)); }
   }, [initialData, isOpen]);
 
-  const cats = type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-  const freqOpts = [{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'biweekly', label: 'Biweekly' }, { value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly' }];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,19 +42,23 @@ export default function RecurringForm({ isOpen, onClose, onSubmit, initialData }
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={initialData ? 'Edit Rule' : 'New Recurring Rule'}>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <Button type="button" variant={type === 'income' ? 'primary' : 'secondary'} size="sm" onClick={() => { setType('income'); setCategory(''); }}>Income</Button>
-          <Button type="button" variant={type === 'expense' ? 'primary' : 'secondary'} size="sm" onClick={() => { setType('expense'); setCategory(''); }}>Expense</Button>
-        </div>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        <Select label="Type" value={type} onChange={e => setType(e.target.value as 'income' | 'expense')} options={[{ value: 'expense', label: 'Expense' }, { value: 'income', label: 'Income' }]} />
         <Input label="Amount" type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" />
-        <Select label="Category" value={category} onChange={e => setCategory(e.target.value)} options={cats.map(c => ({ value: c.value, label: c.label }))} />
-        <Select label="Frequency" value={frequency} onChange={e => setFrequency(e.target.value)} options={freqOpts} />
-        <Input label="Start Date" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-        <Input label="Description" value={description} onChange={e => setDescription(e.target.value)} placeholder="Monthly rent, salary, etc." />
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={loading}>{initialData ? 'Update' : 'Create'}</Button>
+        <Select label="Category" value={category} onChange={e => setCategory(e.target.value)} options={(type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES).map(c => ({ value: c.value, label: c.label }))} />
+        <Input label="Description (Optional)" value={description} onChange={e => setDescription(e.target.value)} placeholder="e.g. Netflix, Salary" />
+        <div className="grid grid-cols-2 gap-4">
+          <Select label="Frequency" value={frequency} onChange={e => setFrequency(e.target.value)} options={[{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly' }]} />
+          <Input label="Start Date" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+        </div>
+        
+        <div className="flex gap-4 justify-end mt-4">
+          <button type="button" onClick={onClose} className="text-on-surface-variant font-medium soft-press hover:text-on-surface transition-colors px-4 py-3">
+            Cancel
+          </button>
+          <button type="submit" disabled={loading} className="bg-primary text-on-primary font-bold rounded-lg px-8 py-3 soft-press transition-opacity hover:opacity-80 disabled:opacity-50">
+            {initialData ? 'Update' : 'Create'}
+          </button>
         </div>
       </form>
     </Modal>

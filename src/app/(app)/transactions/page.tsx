@@ -2,10 +2,8 @@
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { useApp } from '@/context/AppContext';
-import Button from '@/components/ui/Button';
 import TransactionList from '@/components/transactions/TransactionList';
 import TransactionForm from '@/components/transactions/TransactionForm';
-import EmptyState from '@/components/ui/EmptyState';
 import type { Transaction, Currency } from '@/types';
 
 export default function TransactionsPage() {
@@ -20,15 +18,27 @@ export default function TransactionsPage() {
   };
 
   return (
-    <div>
-      <div className="page-header">
-        <h1>Transactions</h1>
-        <Button icon={<Plus size={18} />} onClick={() => { setEditing(null); setFormOpen(true); }}>Add Transaction</Button>
-      </div>
+    <div className="animate-fadeIn">
       {transactions.length === 0 ? (
-        <EmptyState icon={<Plus size={48} />} title="No transactions yet" description="Add your first income or expense to get started." action={<Button onClick={() => setFormOpen(true)}>Add Transaction</Button>} />
+        <section className="mt-section-gap">
+          <div className="journal-card rounded-lg p-12 text-center flex flex-col items-center justify-center">
+            <Plus size={48} className="text-primary/50 mb-4" />
+            <h3 className="font-headline-md text-xl mb-2 text-on-surface">No transactions yet</h3>
+            <p className="text-on-surface-variant mb-6">Add your first income or expense to get started.</p>
+            <button onClick={() => setFormOpen(true)} className="bg-primary text-on-primary font-bold rounded-lg px-6 py-3 soft-press transition-opacity hover:opacity-80 flex items-center gap-2">
+              <Plus size={18} />
+              <span>Add Transaction</span>
+            </button>
+          </div>
+        </section>
       ) : (
-        <TransactionList transactions={transactions} currency={currency} onEdit={t => { setEditing(t); setFormOpen(true); }} onDelete={deleteTransaction} />
+        <TransactionList 
+          transactions={transactions} 
+          currency={currency} 
+          onEdit={t => { setEditing(t); setFormOpen(true); }} 
+          onDelete={deleteTransaction} 
+          onAdd={() => { setEditing(null); setFormOpen(true); }}
+        />
       )}
       <TransactionForm isOpen={formOpen} onClose={() => { setFormOpen(false); setEditing(null); }} onSubmit={handleSubmit} initialData={editing} />
     </div>

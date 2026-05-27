@@ -2,7 +2,6 @@
 
 import { useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
-import styles from './Modal.module.css';
 
 interface ModalProps {
   isOpen: boolean;
@@ -30,18 +29,27 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
 
   if (!isOpen) return null;
 
-  const sizeClass = size === 'sm' ? styles.sm : size === 'lg' ? styles.lg : styles.md;
+  const sizeClass = size === 'sm' ? 'max-w-sm' : size === 'lg' ? 'max-w-2xl' : 'max-w-md';
 
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={[styles.modal, sizeClass].join(' ')} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.header}>
-          <h2 className={styles.title}>{title}</h2>
-          <button className={styles.closeBtn} onClick={onClose} aria-label="Close modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn" onClick={onClose}>
+      <div 
+        className={`bg-surface-container w-full ${sizeClass} rounded-2xl shadow-2xl overflow-hidden border border-white/5 animate-slideUp`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-6 pb-4 border-b border-white/5">
+          <h2 className="text-lg font-headline-md text-on-surface">{title}</h2>
+          <button 
+            className="text-on-surface-variant hover:text-on-surface transition-colors soft-press p-1" 
+            onClick={onClose} 
+            aria-label="Close modal"
+          >
             <X size={20} />
           </button>
         </div>
-        <div className={styles.body}>{children}</div>
+        <div className="p-6 pt-4">
+          {children}
+        </div>
       </div>
     </div>
   );

@@ -71,7 +71,7 @@ function b64ToBuf(b64: string): Uint8Array {
 // ---------------------------------------------------------------------------
 
 export function CryptoProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [dataKey, setDataKey] = useState<CryptoKey | null>(null);
   const [encMeta, setEncMeta] = useState<EncryptionMeta | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -89,8 +89,14 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
   // -----------------------------------------------------------------------
   useEffect(() => {
     if (!user) {
-      // Only wipe the session key on a REAL sign-out, not the initial null
-      // that occurs while Firebase is resolving the auth session on refresh.
+      if (authLoading) {
+        // Auth is still resolving (Firebase checking session after page refresh).
+        // Keep isLoading=true so AppContext does NOT run fetchData yet.
+        // Do NOT touch sessionStorage or any state here.
+        setIsLoading(true);
+        return;
+      }
+      // Auth has fully resolved and user is genuinely signed out.
       if (didHaveUser.current) {
         sessionStorage.removeItem(SESSION_KEY_NAME);
       }
@@ -137,7 +143,7 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
     })();
 
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, authLoading]);
 
   // -----------------------------------------------------------------------
   // Auto setup/unlock when password + user + metadata are all ready

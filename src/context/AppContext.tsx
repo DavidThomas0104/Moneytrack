@@ -98,7 +98,7 @@ interface AppContextValue extends AppState {
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { dataKey, isEncryptionEnabled, isLocked, isLoading: cryptoLoading } = useCrypto();
   const [state, dispatch] = useReducer(appReducer, initialState);
   // Prevent the recurring engine from firing more than once per user session.
@@ -111,6 +111,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const key = dataKey;
 
   const fetchData = useCallback(async () => {
+    // Wait for Firebase auth to finish resolving before doing anything.
+    // Without this, the initial null user triggers a state wipe every refresh.
+    if (authLoading) return;
+
     if (!user) {
       recurringProcessedRef.current = false;
       dispatch({ type: 'SET_DATA', payload: { transactions: [], budgets: [], recurringRules: [], settings: null } });
@@ -173,13 +177,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       console.error('Failed to fetch data:', err);
       dispatch({ type: 'SET_LOADING', payload: false });
     }
-  }, [user, key, isEncryptionEnabled, isLocked]);
+  }, [user, authLoading, key, isEncryptionEnabled, isLocked]);
 
   useEffect(() => {
-    // Don't fetch while crypto is still loading
-    if (cryptoLoading) return;
+    // Don't fetch while auth or crypto are still loading
+    if (authLoading || cryptoLoading) return;
     fetchData();
-  }, [fetchData, cryptoLoading]);
+  }, [fetchData, authLoading, cryptoLoading]);
 
   const addTransaction = useCallback(async (data: Omit<Transaction, 'id'>) => {
     if (!user) return;

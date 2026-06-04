@@ -6,6 +6,7 @@ import {
   useReducer,
   useCallback,
   useEffect,
+  useRef,
   type ReactNode,
 } from 'react';
 import toast from 'react-hot-toast';
@@ -100,12 +101,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { dataKey, isEncryptionEnabled, isLocked, isLoading: cryptoLoading } = useCrypto();
   const [state, dispatch] = useReducer(appReducer, initialState);
+  // Prevent the recurring engine from firing more than once per user session.
+  // fetchData is recreated several times as crypto state settles on startup,
+  // so without this guard the engine would run (and create duplicate transactions)
+  // on each re-creation.
+  const recurringProcessedRef = useRef(false);
 
   // Use the key for encryption — null means no encryption (backward compat)
   const key = dataKey;
 
   const fetchData = useCallback(async () => {
     if (!user) {
+      recurringProcessedRef.current = false;
       dispatch({ type: 'SET_DATA', payload: { transactions: [], budgets: [], recurringRules: [], settings: null } });
       return;
     }
@@ -127,35 +134,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_DATA', payload: { transactions, budgets, recurringRules, settings } });
 
       // ── Recurring engine: generate any due transactions ──────────────────
-      const { transactions: newTxns, updatedRules } = processRecurringRules(recurringRules);
+      // Guard: only run once per user session to prevent duplicate transactions
+      // when fetchData is called multiple times during startup.
+      if (!recurringProcessedRef.current) {
+        recurringProcessedRef.current = true;
+        const { transactions: newTxns, updatedRules } = processRecurringRules(recurringRules);
 
-      if (newTxns.length > 0) {
-        // Write all new transactions to Firestore in parallel
-        const addedTxns = await Promise.all(
-          newTxns.map(async (txnData) => {
-            const id = await fs.addTransaction(user.uid, txnData, key);
-            return { ...txnData, id } as Transaction;
-          })
-        );
+        if (newTxns.length > 0) {
+          // Write all new transactions to Firestore
+          const addedTxns = await Promise.all(
+            newTxns.map(async (txnData) => {
+              const id = await fs.addTransaction(user.uid, txnData, key);
+              return { ...txnData, id } as Transaction;
+            })
+          );
 
-        // Update lastProcessedDate on each rule
-        await Promise.all(
-          updatedRules.map(({ id, lastProcessedDate }) =>
-            fs.updateRecurringRule(user.uid, id, { lastProcessedDate }, key)
-          )
-        );
+          // Persist lastProcessedDate so next session knows where we left off
+          await Promise.all(
+            updatedRules.map(({ id, lastProcessedDate }) =>
+              fs.updateRecurringRule(user.uid, id, { lastProcessedDate }, key)
+            )
+          );
 
-        // Update local state with new transactions and updated rules
-        dispatch({
-          type: 'SET_DATA',
-          payload: {
-            transactions: [...addedTxns, ...transactions],
-            recurringRules: recurringRules.map((r) => {
-              const updated = updatedRules.find((u) => u.id === r.id);
-              return updated ? { ...r, lastProcessedDate: updated.lastProcessedDate } : r;
-            }),
-          },
-        });
+          // Update local state
+          dispatch({
+            type: 'SET_DATA',
+            payload: {
+              transactions: [...addedTxns, ...transactions],
+              recurringRules: recurringRules.map((r) => {
+                const updated = updatedRules.find((u) => u.id === r.id);
+                return updated ? { ...r, lastProcessedDate: updated.lastProcessedDate } : r;
+              }),
+            },
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to fetch data:', err);

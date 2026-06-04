@@ -38,7 +38,6 @@ interface CryptoContextValue {
   isEncryptionEnabled: boolean;
   isLoading: boolean;
   isLocked: boolean;
-  /** Store the login password so encryption auto-initializes after auth. */
   setPassword: (password: string) => void;
   lockEncryption: () => void;
 }
@@ -79,34 +78,46 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
   const [metaLoaded, setMetaLoaded] = useState(false);
   const pendingPassword = useRef<string | null>(null);
 
+  // Track whether we previously had a logged-in user.
+  // This lets us distinguish a genuine sign-out (user goes null AFTER being set)
+  // from the initial page-load null state BEFORE Firebase restores the session.
+  // We must NOT clear sessionStorage in the second case or the saved key is lost.
+  const didHaveUser = useRef(false);
+
   // -----------------------------------------------------------------------
   // Load encryption metadata when user changes
   // -----------------------------------------------------------------------
   useEffect(() => {
     if (!user) {
+      // Only wipe the session key on a REAL sign-out, not the initial null
+      // that occurs while Firebase is resolving the auth session on refresh.
+      if (didHaveUser.current) {
+        sessionStorage.removeItem(SESSION_KEY_NAME);
+      }
+      didHaveUser.current = false;
       setDataKey(null);
       setEncMeta(null);
       setIsLoading(false);
       setMetaLoaded(false);
-      // Clear session key on sign-out
-      sessionStorage.removeItem(SESSION_KEY_NAME);
+      pendingPassword.current = null;
       return;
     }
+
+    didHaveUser.current = true;
 
     let cancelled = false;
     (async () => {
       setIsLoading(true);
       try {
-        // 1. Try restoring the key from sessionStorage first (page refresh case)
+        // 1. Try restoring the key from sessionStorage first (page refresh case).
+        //    sessionStorage persists across refreshes but is cleared when the tab closes.
         const sessionKeyB64 = sessionStorage.getItem(SESSION_KEY_NAME);
         if (sessionKeyB64) {
           try {
             const restoredKey = await importKeyFromBase64(sessionKeyB64);
-            if (!cancelled) {
-              setDataKey(restoredKey);
-            }
+            if (!cancelled) setDataKey(restoredKey);
           } catch {
-            // Corrupted session key — remove it and fall through to normal unlock
+            // Corrupted entry — remove it and fall through to password-based unlock
             sessionStorage.removeItem(SESSION_KEY_NAME);
           }
         }
@@ -140,21 +151,20 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
       setIsLoading(true);
       try {
         if (encMeta) {
-          // Existing user — unlock
+          // Existing user — unlock with login password
           const salt = b64ToBuf(encMeta.salt);
           const wrappingKey = await deriveKey(password, salt);
           const key = await unwrapDataKey(encMeta.wrappedKey, encMeta.iv, wrappingKey);
-          // Persist to sessionStorage so refreshes don't require re-login
+          // Save to sessionStorage so refreshes don't need re-login
           const keyB64 = await exportKeyToBase64(key);
           sessionStorage.setItem(SESSION_KEY_NAME, keyB64);
           setDataKey(key);
         } else {
-          // New user — first-time setup
+          // New user — first-time encryption setup
           const salt = generateSalt();
           const wrappingKey = await deriveKey(password, salt);
           const newDataKey = await generateDataKey();
           const { wrappedKey, iv } = await wrapDataKey(newDataKey, wrappingKey);
-
           const meta: EncryptionMeta = {
             salt: bufToB64(salt),
             wrappedKey,
@@ -162,11 +172,8 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
             createdAt: new Date().toISOString(),
           };
           await setDoc(doc(db, 'users', user.uid, 'settings', 'encryption'), meta);
-
-          // Persist to sessionStorage
           const keyB64 = await exportKeyToBase64(newDataKey);
           sessionStorage.setItem(SESSION_KEY_NAME, keyB64);
-
           setEncMeta(meta);
           setDataKey(newDataKey);
         }
@@ -180,18 +187,7 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
   }, [user, metaLoaded, encMeta, dataKey]);
 
   // -----------------------------------------------------------------------
-  // Clear key on sign-out
-  // -----------------------------------------------------------------------
-  useEffect(() => {
-    if (!user) {
-      setDataKey(null);
-      pendingPassword.current = null;
-      sessionStorage.removeItem(SESSION_KEY_NAME);
-    }
-  }, [user]);
-
-  // -----------------------------------------------------------------------
-  // Public: store password (called from login/signup pages before auth)
+  // Public API
   // -----------------------------------------------------------------------
   const setPassword = useCallback((password: string) => {
     pendingPassword.current = password;

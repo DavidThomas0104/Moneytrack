@@ -1,4 +1,4 @@
-﻿// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // src/lib/crypto.ts — Client-side AES-256-GCM encryption using Web Crypto API
 // ---------------------------------------------------------------------------
 
@@ -118,6 +118,28 @@ export async function unwrapDataKey(
     wrappedKey,
     wrappingKey,
     { name: 'AES-GCM', iv },
+    { name: 'AES-GCM', length: KEY_LENGTH },
+    true,
+    ['encrypt', 'decrypt']
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Session Key Persistence (survives page refresh, cleared on tab close)
+// ---------------------------------------------------------------------------
+
+/** Export a CryptoKey to a Base64 string for sessionStorage. */
+export async function exportKeyToBase64(key: CryptoKey): Promise<string> {
+  const raw = await crypto.subtle.exportKey('raw', key);
+  return bufferToBase64(raw);
+}
+
+/** Import a Base64 string back into a CryptoKey from sessionStorage. */
+export async function importKeyFromBase64(b64: string): Promise<CryptoKey> {
+  const raw = base64ToArrayBuffer(b64);
+  return crypto.subtle.importKey(
+    'raw',
+    raw,
     { name: 'AES-GCM', length: KEY_LENGTH },
     true,
     ['encrypt', 'decrypt']

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import {
   createContext,
@@ -18,6 +18,8 @@ import {
   generateSalt,
   wrapDataKey,
   unwrapDataKey,
+  exportKeyToBase64,
+  importKeyFromBase64,
 } from '@/lib/crypto';
 
 // ---------------------------------------------------------------------------
@@ -46,6 +48,8 @@ interface CryptoContextValue {
 // ---------------------------------------------------------------------------
 
 const CryptoContext = createContext<CryptoContextValue | undefined>(undefined);
+
+const SESSION_KEY_NAME = 'or_session_key';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,6 +88,8 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
       setEncMeta(null);
       setIsLoading(false);
       setMetaLoaded(false);
+      // Clear session key on sign-out
+      sessionStorage.removeItem(SESSION_KEY_NAME);
       return;
     }
 
@@ -91,6 +97,21 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
     (async () => {
       setIsLoading(true);
       try {
+        // 1. Try restoring the key from sessionStorage first (page refresh case)
+        const sessionKeyB64 = sessionStorage.getItem(SESSION_KEY_NAME);
+        if (sessionKeyB64) {
+          try {
+            const restoredKey = await importKeyFromBase64(sessionKeyB64);
+            if (!cancelled) {
+              setDataKey(restoredKey);
+            }
+          } catch {
+            // Corrupted session key — remove it and fall through to normal unlock
+            sessionStorage.removeItem(SESSION_KEY_NAME);
+          }
+        }
+
+        // 2. Always load encryption metadata from Firestore
         const snap = await getDoc(doc(db, 'users', user.uid, 'settings', 'encryption'));
         if (!cancelled) {
           setEncMeta(snap.exists() ? (snap.data() as EncryptionMeta) : null);
@@ -123,6 +144,9 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
           const salt = b64ToBuf(encMeta.salt);
           const wrappingKey = await deriveKey(password, salt);
           const key = await unwrapDataKey(encMeta.wrappedKey, encMeta.iv, wrappingKey);
+          // Persist to sessionStorage so refreshes don't require re-login
+          const keyB64 = await exportKeyToBase64(key);
+          sessionStorage.setItem(SESSION_KEY_NAME, keyB64);
           setDataKey(key);
         } else {
           // New user — first-time setup
@@ -138,6 +162,10 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
             createdAt: new Date().toISOString(),
           };
           await setDoc(doc(db, 'users', user.uid, 'settings', 'encryption'), meta);
+
+          // Persist to sessionStorage
+          const keyB64 = await exportKeyToBase64(newDataKey);
+          sessionStorage.setItem(SESSION_KEY_NAME, keyB64);
 
           setEncMeta(meta);
           setDataKey(newDataKey);
@@ -158,6 +186,7 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
     if (!user) {
       setDataKey(null);
       pendingPassword.current = null;
+      sessionStorage.removeItem(SESSION_KEY_NAME);
     }
   }, [user]);
 
@@ -171,6 +200,7 @@ export function CryptoProvider({ children }: { children: ReactNode }) {
   const lockEncryption = useCallback(() => {
     setDataKey(null);
     pendingPassword.current = null;
+    sessionStorage.removeItem(SESSION_KEY_NAME);
   }, []);
 
   const value: CryptoContextValue = {

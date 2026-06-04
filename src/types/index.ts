@@ -21,6 +21,7 @@ export interface RecurringRule {
   endDate?: string;
   isActive: boolean;
   createdAt: string;
+  lastProcessedDate?: string; // ISO date of last generated transaction
 }
 
 export interface Budget {

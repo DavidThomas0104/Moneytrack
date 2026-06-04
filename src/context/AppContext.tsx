@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import {
   createContext,
@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
 import { useCrypto } from '@/context/CryptoContext';
 import * as fs from '@/lib/firestore';
+import { processRecurringRules } from '@/utils/recurringEngine';
 import type { Transaction, Budget, RecurringRule, UserSettings } from '@/types';
 
 // ---------------------------------------------------------------------------
@@ -124,6 +125,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fs.getUserSettings(user.uid, key),
       ]);
       dispatch({ type: 'SET_DATA', payload: { transactions, budgets, recurringRules, settings } });
+
+      // ── Recurring engine: generate any due transactions ──────────────────
+      const { transactions: newTxns, updatedRules } = processRecurringRules(recurringRules);
+
+      if (newTxns.length > 0) {
+        // Write all new transactions to Firestore in parallel
+        const addedTxns = await Promise.all(
+          newTxns.map(async (txnData) => {
+            const id = await fs.addTransaction(user.uid, txnData, key);
+            return { ...txnData, id } as Transaction;
+          })
+        );
+
+        // Update lastProcessedDate on each rule
+        await Promise.all(
+          updatedRules.map(({ id, lastProcessedDate }) =>
+            fs.updateRecurringRule(user.uid, id, { lastProcessedDate }, key)
+          )
+        );
+
+        // Update local state with new transactions and updated rules
+        dispatch({
+          type: 'SET_DATA',
+          payload: {
+            transactions: [...addedTxns, ...transactions],
+            recurringRules: recurringRules.map((r) => {
+              const updated = updatedRules.find((u) => u.id === r.id);
+              return updated ? { ...r, lastProcessedDate: updated.lastProcessedDate } : r;
+            }),
+          },
+        });
+      }
     } catch (err) {
       console.error('Failed to fetch data:', err);
       dispatch({ type: 'SET_LOADING', payload: false });
